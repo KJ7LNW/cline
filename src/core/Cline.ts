@@ -47,7 +47,7 @@ import { AssistantMessageContent, parseAssistantMessage, ToolParamName, ToolUseN
 import { constructNewFileContent } from "./assistant-message/diff"
 import { parseMentions } from "./mentions"
 import { formatResponse } from "./prompts/responses"
-import { addUserInstructions, SYSTEM_PROMPT } from "./prompts/system"
+import { SYSTEM_PROMPT } from "./prompts/system"
 import { getNextTruncationRange, getTruncatedMessages } from "./sliding-window"
 import { ClineProvider, GlobalFileNames } from "./webview/ClineProvider"
 import { showSystemNotification } from "../integrations/notifications"
@@ -1186,30 +1186,33 @@ export class Cline {
 			throw new Error("MCP hub not available")
 		}
 
-		let systemPrompt = await SYSTEM_PROMPT(
-			cwd,
-			this.api.getModel().info.supportsComputerUse ?? false,
-			mcpHub,
-			this.browserSettings,
-		)
-		let settingsCustomInstructions = this.customInstructions?.trim()
 		const clineRulesFilePath = path.resolve(cwd, GlobalFileNames.clineRules)
 		let clineRulesFileInstructions: string | undefined
+		let ruleFileContent: string | undefined
 		if (await fileExistsAtPath(clineRulesFilePath)) {
 			try {
-				const ruleFileContent = (await fs.readFile(clineRulesFilePath, "utf8")).trim()
-				if (ruleFileContent) {
-					clineRulesFileInstructions = `# .clinerules\n\nThe following is provided by a root-level .clinerules file where the user has specified instructions for this working directory (${cwd.toPosix()})\n\n${ruleFileContent}`
-				}
+				ruleFileContent = (await fs.readFile(clineRulesFilePath, "utf8")).trim()
 			} catch {
 				console.error(`Failed to read .clinerules file at ${clineRulesFilePath}`)
 			}
 		}
 
-		if (settingsCustomInstructions || clineRulesFileInstructions) {
-			// altering the system prompt mid-task will break the prompt cache, but in the grand scheme this will not change often so it's better to not pollute user messages with it the way we have to with <potentially relevant details>
-			systemPrompt += addUserInstructions(settingsCustomInstructions, clineRulesFileInstructions)
-		}
+		// For system prompt templates, see assets/system-instructions.d/
+		let systemPrompt = await SYSTEM_PROMPT(this.providerRef, {
+
+			cwd,
+			supportsComputerUse: this.api.getModel().info.supportsComputerUse ?? false,
+			mcpHub,
+
+			// rendered in assets/system-instructions.d/85-custom.txt
+			customInstructions: this.customInstructions?.trim(),
+
+			// rendered in assets/system-instructions.d/86-clinerules.txt
+			ruleFileContent,
+
+			// rendered in assets/system-instructions.d/18-browser_action.txt
+			browserSettings: this.browserSettings
+		})
 
 		// If the previous API request's total token usage is close to the context window, truncate the conversation history to free up space for the new request
 		if (previousApiReqIndex >= 0) {
